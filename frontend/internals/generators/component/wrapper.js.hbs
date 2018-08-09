@@ -1,0 +1,22 @@
+{{#if connected}}
+import { connect } from 'react-redux';
+import { setDisplayName, compose } from 'hoc';
+{{/if}}
+import {{ name }} from './{{ name}}';
+
+{{#if connected}}
+const mapStateToProps = state => ({
+});
+
+const mapDispatchToProps = {
+};
+
+const {{ name }}Wrapper = compose(
+  setDisplayName('{{ name }}Wrapper'),
+  connect(mapStateToProps, mapDispatchToProps),
+)({{ name }});
+{{else}}
+const {{ name }}Wrapper = {{ name }};
+{{/if}}
+
+export default {{ name }}Wrapper;

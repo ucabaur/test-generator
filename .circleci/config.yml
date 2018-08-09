@@ -1,0 +1,201 @@
+version: 2
+
+parameters:
+  deploy_steps: &deploy_steps
+    - setup_remote_docker:
+        docker_layer_caching: true
+
+    - run:
+        name: Install system dependencies
+        command: apk add git make openssh python py-pip rsync zip
+
+    - checkout
+
+    - run:
+        name: Install AWS CLI
+        command: pip install awsebcli awscli
+
+    - run:
+        name: Build images
+        working_directory: devops/deployment
+        command: make images
+
+    - run:
+        name: Tag images for deployment
+        command: |
+          docker tag testwill/backend:latest $BACKEND_REPO_URL:$ENV &&
+          docker tag testwill/static:latest $STATIC_REPO_URL:$ENV
+
+    - run:
+        name: Authenticate with registry
+        command: $(aws ecr get-login --no-include-email)
+
+    - run:
+        name: Push docker images to registry
+        command: |
+          docker push $BACKEND_REPO_URL:$ENV &&
+          docker push $STATIC_REPO_URL:$ENV
+
+    - run:
+        name: Build EB archive
+        working_directory: devops/deployment
+        command: make archive.zip env=$ENV
+
+    - run:
+        name: Deploy to EB
+        working_directory: devops/deployment
+        command: eb deploy
+
+jobs:
+  backend:
+    working_directory: ~/testwill
+
+    docker:
+      - image: python:3.7
+      - image: postgres:10
+
+    environment:
+      DATABASE_URL: postgres://postgres@localhost:5432/postgres
+      DJANGO_SETTINGS_MODULE: testwill.settings.dev
+
+    steps:
+      - checkout
+
+      - restore_cache:
+          keys:
+            - backend-{{ .Branch }}-{{ checksum "backend/Pipfile.lock" }}
+            - backend-{{ .Branch }}
+            - backend-master-{{ checksum "backend/Pipfile.lock" }}
+            - backend-master
+
+      - run:
+          name: Install pipenv
+          command: pip install pipenv black
+
+      - run:
+          name: Install python dependencies
+          working_directory: backend
+          command: pipenv install --dev --system
+
+      - run:
+          name: Check for security vulnerabilities
+          working_directory: backend
+          command: pipenv check
+
+      - run:
+          name: Check format
+          working_directory: backend
+          command: black --diff --check .
+
+      - run:
+          name: Check code style
+          working_directory: backend
+          command: flake8 .
+
+      - run:
+          name: Check imports order
+          working_directory: backend
+          command: isort --check-only --recursive --diff .
+
+      - run:
+          name: Migrate database
+          working_directory: backend
+          command: ./manage.py migrate
+
+      - run:
+          name: Run tests
+          working_directory: backend
+          command: coverage run --source='.' --omit='*migrations*' manage.py test
+
+      - run:
+          name: Check coverage
+          working_directory: backend
+          command: coverage report --fail-under 70 --skip-covered -m
+
+      - save_cache:
+          key: backend-{{ .Branch }}-{{ checksum "backend/Pipfile.lock" }}
+          paths:
+            - ~/.cache/pip
+
+  frontend:
+    working_directory: ~/testwill
+
+    docker:
+      - image: circleci/node:8.9
+
+    environment:
+      NODE_ENV: test
+
+    steps:
+      - checkout
+
+      - restore_cache:
+          keys:
+            - v2-{{ checksum "frontend/package.json" }}
+
+      # Only install deps if cache hasn't done it for us already
+      - run:
+          name: Install dependencies
+          working_directory: frontend
+          command: |
+              [ -d node_modules ] ||
+              yarn
+
+      - run:
+          name: Run tests
+          working_directory: frontend
+          command: yarn test
+
+      - save_cache:
+          key: v2-{{ checksum "frontend/package.json" }}
+          paths:
+            - ~/.yarn
+            - ~/project/node_modules
+
+  deploy-staging:
+    working_directory: ~/testwill
+
+    docker:
+      - image: docker:latest
+
+    environment:
+      AWS_DEFAULT_REGION: eu-west-2
+      ENV: staging
+
+    steps: *deploy_steps
+
+  deploy-production:
+    working_directory: ~/testwill
+
+    docker:
+      - image: docker:latest
+
+    environment:
+      AWS_DEFAULT_REGION: eu-west-2
+      ENV: production
+
+    steps: *deploy_steps
+
+
+workflows:
+  version: 2
+  stack:
+    jobs:
+      - backend
+      - frontend
+      - deploy-staging:
+          requires:
+            - frontend
+            - backend
+          filters:
+            branches:
+              only:
+                - master
+      - deploy-production:
+          requires:
+            - frontend
+            - backend
+          filters:
+            branches:
+              only:
+                - production

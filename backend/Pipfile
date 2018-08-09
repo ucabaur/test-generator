@@ -1,0 +1,27 @@
+[[source]]
+url = "https://pypi.python.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+"boto3" = "*"
+dj-database-url = "*"
+django = {extras = ["argon2"]}
+django-memoize = "*"
+django-storages = "*"
+"psycopg2-binary" = "*"
+pytz = "*"
+requests = "*"
+
+[dev-packages]
+"flake8" = "*"
+factory-boy = "*"
+coverage = "*"
+django-debug-toolbar = "*"
+django-extensions = "*"
+isort = "*"
+ptvsd = "==3.0.0"
+django-ptvsd = "*"
+
+[requires]
+python_version = "3.7"
